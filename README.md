@@ -42,6 +42,8 @@ Read each paper in full and score each one independently. Rate 0-100 on:
 - Overall
 - Title
 - Abstract
+- Introduction
+- Method description
 - Experiment design
 
 Output a comparison table sorted by Overall (highest first).
