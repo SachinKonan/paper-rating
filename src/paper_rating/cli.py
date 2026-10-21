@@ -143,7 +143,7 @@ def agent_command(agent: str, run: Path, references: Path, model: str | None, ef
         if sandbox not in CODEX_SANDBOXES:
             raise ValueError(f"codex sandbox must be one of: {', '.join(CODEX_SANDBOXES)}")
         shared = [
-            "--skip-git-repo-check", "--color", "never", "--json",
+            "--skip-git-repo-check", "--json",
             "--output-last-message", str(run / report),
             "--config", f'model_reasoning_effort="{effort}"',
             "--ignore-user-config", "--ignore-rules",
@@ -152,12 +152,12 @@ def agent_command(agent: str, run: Path, references: Path, model: str | None, ef
             "--config", "developer_instructions=" + json.dumps(WORKSPACE_INSTRUCTIONS),
         ]
         if resume:
-            # `exec resume` has no --sandbox or --cd; set the sandbox through config and run in `run`.
+            # `exec resume` has no --sandbox, --cd or --color; set the sandbox through config and run in `run`.
             command = ["codex", "--ask-for-approval", "never", "exec", "resume",
                        "--config", f'sandbox_mode="{sandbox}"', *shared]
         else:
             command = ["codex", "--ask-for-approval", "never", "exec", "--sandbox", sandbox,
-                       *([] if session else ["--ephemeral"]), "--cd", str(run), *shared]
+                       *([] if session else ["--ephemeral"]), "--color", "never", "--cd", str(run), *shared]
     else:
         if resume:
             persistence = ["--resume", resume]

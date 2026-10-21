@@ -114,6 +114,8 @@ class CliTests(unittest.TestCase):
         self.assertEqual(resumed[resumed.index('exec') + 1], 'resume')
         self.assertEqual(resumed[-2:], ['T-1', '-'])
         self.assertIn('sandbox_mode="danger-full-access"', resumed)
+        for flag in ('--sandbox', '--cd', '--color', '--ephemeral'):  # not accepted by `codex exec resume`
+            self.assertNotIn(flag, resumed)
         self.assertEqual(resumed[resumed.index('--output-last-message') + 1], str(run / 'followup.md'))
         claude = agent_command('claude', run, self.refs, 'opus', 'high', session='S-1')
         self.assertEqual(claude[claude.index('--session-id') + 1], 'S-1')
