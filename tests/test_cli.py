@@ -100,6 +100,27 @@ class CliTests(unittest.TestCase):
         self.assertNotIn('--continue', claude)
         with self.assertRaises(ValueError):
             agent_command('codex', run, self.refs, None, 'max')
+        self.assertIn('--ephemeral', codex)
+        with self.assertRaises(ValueError):
+            agent_command('codex', run, self.refs, None, 'high', sandbox='workspace-write')
+
+    def test_follow_up_commands_persist_then_resume(self):
+        run = self.prepare()
+        codex = agent_command('codex', run, self.refs, 'm', 'high', session='persist')
+        self.assertNotIn('--ephemeral', codex)
+        self.assertNotIn('resume', codex)
+        resumed = agent_command('codex', run, self.refs, 'm', 'high', resume='T-1', report='followup.md',
+                                sandbox='danger-full-access')
+        self.assertEqual(resumed[resumed.index('exec') + 1], 'resume')
+        self.assertEqual(resumed[-2:], ['T-1', '-'])
+        self.assertIn('sandbox_mode="danger-full-access"', resumed)
+        self.assertEqual(resumed[resumed.index('--output-last-message') + 1], str(run / 'followup.md'))
+        claude = agent_command('claude', run, self.refs, 'opus', 'high', session='S-1')
+        self.assertEqual(claude[claude.index('--session-id') + 1], 'S-1')
+        self.assertNotIn('--no-session-persistence', claude)
+        claude_resumed = agent_command('claude', run, self.refs, 'opus', 'high', resume='S-1')
+        self.assertEqual(claude_resumed[claude_resumed.index('--resume') + 1], 'S-1')
+        self.assertIn('--restricted', claude_resumed)
 
     def invoke(self, extra):
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
@@ -152,6 +173,48 @@ print(json.dumps({'type': 'turn.completed'}))
                 args = json.loads((run / 'received-args.json').read_text())
                 self.assertEqual(args[args.index('--model') + 1], 'test-model')
                 self.assertIn('88', (run / 'review.md').read_text())
+                (run / 'checked').touch()
+
+    def recording_stub(self, agent):
+        """Stub that logs every call, so a scoring run and its follow-up can both be checked."""
+        executable = self.root / agent
+        import sys
+        executable.write_text(f'#!{sys.executable}\n' + '''import json, pathlib, sys
+args = sys.argv[1:]
+calls = pathlib.Path('calls.jsonl')
+n = len(calls.read_text().splitlines()) if calls.exists() else 0
+with calls.open('a') as f:
+    f.write(json.dumps({'args': args, 'prompt': sys.stdin.read()}) + '\\n')
+answer = '| Paper | Overall |\\n| Draft | 88 |' if n == 0 else 'Reasons and improvements for the draft'
+''' + ('''print(json.dumps({'type': 'thread.started', 'thread_id': 'thread-123'}))
+pathlib.Path(args[args.index('--output-last-message') + 1]).write_text(answer + '\\n')
+print(json.dumps({'type': 'turn.completed'}))
+''' if agent == 'codex' else '''print(json.dumps({'type': 'result', 'is_error': False, 'result': answer}))
+'''))
+        executable.chmod(0o755)
+        return {'PATH': str(self.root) + os.pathsep + os.environ.get('PATH', '')}
+
+    def test_follow_up_continues_the_scoring_session(self):
+        for agent in ('codex', 'claude'):
+            with self.subTest(agent=agent), patch.dict(os.environ, self.recording_stub(agent)):
+                self.assertEqual(self.invoke(['--agent', agent, '--follow-up']), 0)
+                run = next(p for p in self.out.iterdir() if not (p / 'checked').exists())
+                calls = [json.loads(line) for line in (run / 'calls.jsonl').read_text().splitlines()]
+                self.assertEqual(len(calls), 2)
+                first, second = calls
+                self.assertEqual(first['prompt'], PROMPT)  # the scoring prompt is sent unchanged
+                self.assertIn(self.paper.name, second['prompt'])
+                metadata = json.loads((run / 'run.json').read_text())
+                self.assertEqual(metadata['status'], 'complete')
+                self.assertEqual(metadata['followup_status'], 'complete')
+                if agent == 'codex':
+                    self.assertNotIn('--ephemeral', first['args'])
+                    self.assertEqual(second['args'][-2:], ['thread-123', '-'])
+                else:
+                    session = first['args'][first['args'].index('--session-id') + 1]
+                    self.assertEqual(second['args'][second['args'].index('--resume') + 1], session)
+                self.assertIn('88', (run / 'review.md').read_text())
+                self.assertIn('Reasons and improvements', (run / 'followup.md').read_text())
                 (run / 'checked').touch()
 
     def test_claude_error_result_is_failure(self):

@@ -21,6 +21,14 @@ uv run paper_rating /path/to/paper.pdf --pages 12 --agent claude --model opus --
 
 `uv` installs the Python dependencies automatically. `--pages 12` keeps pages 1 through 12, inclusive, in a new PDF; the original is untouched. Omit `--pages` to use the whole draft. A page limit beyond the end of the draft is an error.
 
+Add `--follow-up` to ask, after scoring, why your draft is ranked where it is and how it could score higher:
+
+```bash
+uv run paper_rating /path/to/paper.pdf --pages 12 --agent codex --model YOUR_MODEL --effort high --follow-up
+```
+
+The scoring prompt is sent unchanged. Once the table is done, the same session receives the follow-up prompt (stored in `src/paper_rating/followup.txt`), which names your draft and asks for page-cited reasons per category and a prioritized list of changes. Its answer is saved to `followup.md` and printed after the table. The follow-up never re-scores.
+
 `--agent` defaults to `codex`, and `--effort` defaults to `high`. Omit `--model` to use the agent's default model. Model names are passed directly to the agent. Codex accepts `minimal`, `low`, `medium`, `high`, and `xhigh`; Claude accepts `low`, `medium`, `high`, `xhigh`, and `max`. The chosen model must support the requested effort.
 
 Each invocation creates a brand-new temporary directory outside the repository, containing:
@@ -31,10 +39,11 @@ Each invocation creates a brand-new temporary directory outside the repository, 
 - `run.json`: the paper inventory, settings, exact agent command, and completion status.
 - `agent.jsonl` and `agent.stderr.log`: the agent's event stream and diagnostics.
 - `review.md`: the final response, also printed to the terminal when the agent succeeds.
+- With `--follow-up`: `followup_prompt.txt`, `followup.jsonl`, `followup.stderr.log`, and `followup.md`.
 
-The wrapper launches one new subprocess in that directory: `codex exec` or `claude -p`. Every evaluation starts with fresh context; neither backend resumes a previous conversation or persists a resumable session. Codex disables memory injection and automatic AGENTS.md loading, ignores user config, and receives only the generated review instructions. Claude uses safe mode to disable automatic memory and instruction loading and receives those same instructions explicitly. Existing CLI authentication is retained.
+The wrapper launches one new subprocess in that directory: `codex exec` or `claude -p`. Every evaluation starts with fresh context; neither backend resumes a previous conversation. Without `--follow-up`, no resumable session is persisted. With it, the scoring session is persisted so that a second subprocess (`codex exec resume` or `claude -p --resume`) can continue that same session, and only that one. Codex disables memory injection and automatic AGENTS.md loading, ignores user config, and receives only the generated review instructions. Claude uses safe mode to disable automatic memory and instruction loading and receives those same instructions explicitly. Existing CLI authentication is retained.
 
-Codex uses a read-only sandbox; Claude's restricted mode confines Read, Glob, and Grep to the run and reference directories. The instructions exclude prior reviews and external sources. The wrapper cannot guarantee that an agent actually reads every page or produces valid scores; inspect its event log when auditing a result.
+Codex uses a read-only sandbox. On machines where its sandbox cannot start (for example, `bwrap: Can't mkdir parents ...` when `/tmp` is a private mount), `--codex-sandbox danger-full-access` runs Codex unsandboxed; use it only where that is acceptable. Claude's restricted mode confines Read, Glob, and Grep to the run and reference directories. The instructions exclude prior reviews and external sources. The wrapper cannot guarantee that an agent actually reads every page or produces valid scores; inspect its event log when auditing a result.
 
 Prepare everything and inspect the command without calling an agent:
 
